@@ -1,23 +1,16 @@
 import pandas as pd
-import nltk
 import regex as re
 from nltk.corpus import wordnet
 from nltk.stem import PorterStemmer
-import csv
-#nltk.download('wordnet')
 
 csv_file = pd.read_csv("Large_Sample_Title.csv", engine='python') #Sample_title.csv
-sample_titles = csv_file['Employement_Employer_Title']  #Employee_Title
+sample_titles = csv_file['Employement_Employer_Title']  #Employement_Employer_Title
 csv_file2 = pd.read_csv("Occupation_Definitions.csv")
-occupation_definitons = csv_file2['specific_onettitle']
+occupation_definitions = csv_file2['specific_onettitle']
 ps = PorterStemmer()
-
 sample_titles = sample_titles.dropna()
 
-Row_list = []
-for index, rows in csv_file2.iterrows():
-    my_list = [rows.ONETCODEID, rows.specific_onettitle]
-    Row_list.append(my_list)
+occupation_id_dict = dict(zip(csv_file2.specific_onettitle, csv_file2.ONETCODEID))
 
 job_title_dict = {}
 for item in sample_titles:
@@ -25,8 +18,9 @@ for item in sample_titles:
     job_title_dict[item] = split_item
 category_title_dict = {}
 
-for item in occupation_definitons:
+for item in occupation_definitions:
     job_def = item
+    item = re.sub(r'OF|AND', '', item)
     split_item = item.split()
     New_item = []
     for word in split_item:
@@ -39,33 +33,49 @@ for item in occupation_definitons:
     category_title_dict[job_def] = New_item
 
 
-def check(word):
+blank_occupation_dict = {}
+for i in occupation_definitions:
+    blank_occupation_dict[i] = 0
+
+
+class similarity_score:
+    def __init__(self, blank_occupation):
+        self.score_dict = blank_occupation
+
+    def add_value(self, occupation, score):
+        self.score_dict[occupation] = float(self.score_dict[occupation]) + float(score)
+
+    def get_score_dict(self):
+        return self.score_dict
+
+
+def check(word_val):
     try:
-        syn2 = wordnet.synsets(word)[0]
+        syn2 = wordnet.synsets(word_val)[0]
         return syn2
     except:
         return 'fail'
 
-def check2(word):
+
+def check2(word_val2):
     try:
-        syn1 = wordnet.synsets(word)[0]
+        syn1 = wordnet.synsets(word_val2)[0]
         return syn1
     except:
         return 'fail'
 
-def check3(syn1, syn2):
+
+def check3(syn1_a, syn2_b):
     try:
-        similarity = syn1.wup_similarity(syn2)
-        return similarity
+        similarity_val = syn1_a.wup_similarity(syn2_b)
+        return similarity_val
     except:
         return 'fail'
 
+
 key_list = []
-occupation_dict = {}
-
-
 for key, value in job_title_dict.items():
-    key_score = [key]
+    sim = similarity_score(blank_occupation_dict.copy())
     for word in value:
         list_of_scores = []
         syn1 = check2(word)
@@ -90,88 +100,59 @@ for key, value in job_title_dict.items():
                     break
                 else:
                     pass
-            result = [key2, previous_similarity]
-            list_of_scores.append(result)
-        org_scores = [word, list_of_scores]
-        key_score.append(org_scores)
-    key_score = [key_score]
+            sim.add_value(key2, float(previous_similarity))
+    occupation_score_dict = sim.get_score_dict()
+    number_of_words = len(value)
+    key_score = [key, number_of_words, occupation_score_dict]
     key_list.append(key_score)
 
+def f1():
+    v = list(d1.values())
+    k = list(d1.keys())
+    return k[v.index(max(v))]
+
+
+list_of_matches = []
+for row in key_list:
+    row_addition_count = 0
+    if row[1] == 1:
+        for occupation_title, similarity_value in row[2].items():
+            if similarity_value >= 0.8:
+                id_code = occupation_id_dict[occupation_title]
+                complete_row = [row[0], id_code, occupation_title, similarity_value]
+                list_of_matches.append(complete_row)
+                row_addition_count += 1
+    else:
+        word_count = row[1] - 0.5
+        for occupation_title, similarity_value in row[2].items():
+            if similarity_value >= word_count:
+                id_code = occupation_id_dict[occupation_title]
+                complete_row = [row[0], id_code, occupation_title, similarity_value]
+                list_of_matches.append(complete_row)
+                row_addition_count += 1
+    if row_addition_count < 1:
+        v = list(row[2].values())
+        k = list(row[2].keys())
+        max_similarity_value = max(v)
+        max_occupation = k[v.index(max(v))]
+        id_code = occupation_id_dict[max_occupation]
+        complete_row = [row[0], id_code, occupation_title, similarity_value]
+        list_of_matches.append(complete_row)
+
+
+column_names = ['Employee_Employer_Job_Title', 'ONETCODEID', 'Occupation_Title', 'Similarity_Score']
+final_result = pd.DataFrame(list_of_matches, columns=column_names)
+final_result.to_csv("Job_Title_Occupation")
 
 print("Done\n")
 
-size = len(key_list)
-number_of_categories = len(key_list[1][0][1][1])
-Categories_to_jobs = []
-
-final_Output = []
-for i in range(size - 1):
-    number_of_words = len(key_list[i][0])
-    #we divided the words
-
-    if number_of_words == 3:
-        final_score = ['empty', 0]
-        three_fourth_match = []
-        for x in range(number_of_categories - 1):
-            word1 = key_list[i][0][1][1][x][1]
-            word2 = key_list[i][0][2][1][x][1]
-            category_score = word1 + word2
-            if category_score >= 1.7:
-                #three_fourth_match = [key_list[i][0][2][1][x][0], category_score]
-                test6 = [key_list[i][0][2][1][x][0], category_score]
-                three_fourth_match.append(test6)
-            elif category_score > final_score[1] and category_score < 1.7:
-                final_score = [key_list[i][0][2][1][x][0], category_score]
-            else:
-                pass
-
-        match2 = three_fourth_match+[final_score]
-        output1 = [key_list[i][0][0], match2]
-        final_Output.append(output1)
-        print(output1)
-
-    if number_of_words == 2:
-        final_score2 = ['empty', 0]
-        full_match = []
-        for x in range(number_of_categories - 1):
-            word1 = key_list[i][0][1][1][x][1]
-            if word1 == 1:
-                full_match.append([key_list[i][0][1][1][x][0], word1])
-            if word1 > final_score2[1] and word1 < 1:
-                final_score2 = [key_list[i][0][1][1][x][0], word1]
-            else:
-                pass
-        matches = full_match+[final_score2]
-        output2 = [key_list[i][0][0], matches]
-        final_Output.append(output2)
-        print(output2)
 
 
 
-#test_dict = {}
-series_list = []
-data_list = []
-for num in range(len(final_Output)):
-    for item in final_Output[num][1]:
-        for i in Row_list:
-            if i[1] == str(item[0]):
-                ide = str(i[0])
-        row_line = [ide, str(final_Output[num][0]), str(item[0]), str(item[1])]
-        data_list.append(row_line)
-    #series_item = pd.Series(final_Output[num][1], name=str(final_Output[num][0]))
-    #series_list.append(series_item)
-    #test_dict[str(final_Output[num])] = final_Output[num][1]
-#final_result = pd.concat(series_list, axis=1)
-#print(data_list)
-column_names = ['ONETCODEID', 'Employement_Employer_Title', 'Occupation', 'Score']
-final_result = pd.DataFrame(data_list, columns=column_names)
-final_result.to_csv("Reformatted_Occupation_Dataframe.csv")
-
-#print(pd.DataFrame.from_dict(test_dict))
 
 
-file = open('Job_Match_Output.csv', "w", newline="")
-writer = csv.writer(file)
-for item in final_Output:
-    writer.writerow([item])
-file.close()
+
+
+
+
+
